@@ -302,6 +302,36 @@ class SQLiteRepository:
             ).fetchone()
         return int((row["cnt"] if row is not None else 0) or 0)
 
+    def delete_user(self, *, user_id: str) -> bool:
+        with self._conn() as conn:
+            convo_rows = conn.execute(
+                "SELECT id FROM conversations WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+            convo_ids = [row["id"] for row in convo_rows]
+            if convo_ids:
+                conn.executemany(
+                    "DELETE FROM messages WHERE conversation_id = ?",
+                    [(cid,) for cid in convo_ids],
+                )
+                conn.executemany(
+                    "DELETE FROM conversation_image_contexts WHERE conversation_id = ?",
+                    [(cid,) for cid in convo_ids],
+                )
+                conn.executemany(
+                    "DELETE FROM conversations WHERE id = ?",
+                    [(cid,) for cid in convo_ids],
+                )
+            conn.execute(
+                "DELETE FROM conversation_image_contexts WHERE user_id = ?",
+                (user_id,),
+            )
+            deleted = conn.execute(
+                "DELETE FROM users WHERE id = ?",
+                (user_id,),
+            ).rowcount
+        return bool(deleted)
+
     def create_conversation(self, *, conversation_id: str, user_id: str, avatar_id: str) -> Conversation:
         created_at = _now_iso()
         with self._conn() as conn:

@@ -11,7 +11,9 @@ from .persistent_service import PersistentChatService, PersistentServiceConfig
 from .persistence import SQLiteRepository
 from .providers import (
     DeterministicLLMProvider,
+    FallbackTTSProvider,
     GeminiChatProvider,
+    GeminiTTSProvider,
     MockTTSProvider,
     OllamaChatProvider,
     OpenAIChatProvider,
@@ -62,6 +64,7 @@ def create_app(db_path: str | None = None):
     repo = SQLiteRepository(resolved_db_path)
     provider_name = os.getenv("AI_PROVIDER", "openai").strip().lower()
     tts_provider_name = os.getenv("TTS_PROVIDER", "system").strip().lower()
+    tts_fallback_provider_name = os.getenv("TTS_FALLBACK_PROVIDER", "system").strip().lower()
     llm_fallback_enabled = os.getenv("LLM_FALLBACK_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
     try:
         system_tts_rate_wpm = int(os.getenv("SYSTEM_TTS_RATE_WPM", "150"))
@@ -148,10 +151,26 @@ def create_app(db_path: str | None = None):
     else:
         llm_provider = DeterministicLLMProvider()
 
+    runtime_tts_provider_name = tts_provider_name
     if tts_provider_name == "mock":
         tts_provider = MockTTSProvider()
+    elif tts_provider_name == "gemini":
+        if tts_fallback_provider_name == "mock":
+            fallback_tts_provider = MockTTSProvider()
+        else:
+            fallback_tts_provider = SystemTTSProvider(rate_wpm=system_tts_rate_wpm)
+            tts_fallback_provider_name = "system"
+        primary_tts_provider = GeminiTTSProvider(
+            api_key=os.getenv("GEMINI_API_KEY"),
+            model=os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts"),
+            base_url=os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com"),
+            voice_name=os.getenv("GEMINI_TTS_VOICE", "Kore"),
+        )
+        tts_provider = FallbackTTSProvider(primary=primary_tts_provider, fallback=fallback_tts_provider)
+        runtime_tts_provider_name = f"gemini->fallback:{tts_fallback_provider_name}"
     else:
         tts_provider = SystemTTSProvider(rate_wpm=system_tts_rate_wpm)
+        runtime_tts_provider_name = "system"
 
     service = PersistentChatService(
         repository=repo,
@@ -160,7 +179,7 @@ def create_app(db_path: str | None = None):
         tts_provider=tts_provider,
         llm_fallback_enabled=llm_fallback_enabled,
         ai_provider_name=provider_name,
-        tts_provider_name=tts_provider_name,
+        tts_provider_name=runtime_tts_provider_name,
     )
     service.seed_avatars(
         [
@@ -182,10 +201,12 @@ def main() -> None:
     with make_server(host, port, app) as server:
         provider_name = os.getenv("AI_PROVIDER", "openai").strip().lower()
         tts_provider_name = os.getenv("TTS_PROVIDER", "system").strip().lower()
+        tts_fallback_provider_name = os.getenv("TTS_FALLBACK_PROVIDER", "system").strip().lower()
         llm_fallback_enabled = os.getenv("LLM_FALLBACK_ENABLED", "true").strip().lower()
         print(
             f"Serving on http://{host}:{port} (AI_PROVIDER={provider_name}, "
-            f"TTS_PROVIDER={tts_provider_name}, SYSTEM_TTS_RATE_WPM={os.getenv('SYSTEM_TTS_RATE_WPM', '150')}, "
+            f"TTS_PROVIDER={tts_provider_name}, TTS_FALLBACK_PROVIDER={tts_fallback_provider_name}, "
+            f"SYSTEM_TTS_RATE_WPM={os.getenv('SYSTEM_TTS_RATE_WPM', '150')}, "
             f"MAX_MESSAGE_CHARS={os.getenv('MAX_MESSAGE_CHARS', '4000')}, "
             f"MAX_TTS_CHARS={os.getenv('MAX_TTS_CHARS', '12000')}, "
             f"MAX_TRAINING_FILE_BYTES={os.getenv('MAX_TRAINING_FILE_BYTES', '8000000')}, "

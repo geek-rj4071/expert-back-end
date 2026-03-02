@@ -5,7 +5,14 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from avatar_ai.providers import GeminiChatProvider, OllamaChatProvider, SystemTTSProvider
+from avatar_ai.providers import (
+    FallbackTTSProvider,
+    GeminiChatProvider,
+    GeminiTTSProvider,
+    MockTTSProvider,
+    OllamaChatProvider,
+    SystemTTSProvider,
+)
 
 
 class _FakeHTTPResponse:
@@ -174,6 +181,69 @@ class SystemTTSProviderTests(unittest.TestCase):
 
         self.assertEqual(out.mime_type, "audio/wav")
         self.assertEqual(out.audio_bytes, b"FAKE_WAV")
+
+
+class GeminiTTSProviderTests(unittest.TestCase):
+    def test_synthesize_requires_api_key(self) -> None:
+        provider = GeminiTTSProvider(api_key="")
+        with self.assertRaises(RuntimeError):
+            provider.synthesize(text="hello", voice_id="alloy")
+
+    def test_synthesize_returns_audio(self) -> None:
+        provider = GeminiTTSProvider(api_key="k", model="gemini-2.5-flash-preview-tts", voice_name="Kore")
+        audio_b64 = "RkFLRV9BVURJTw=="
+        payload = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "audio/wav",
+                                    "data": audio_b64,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        with patch("urllib.request.urlopen", return_value=_FakeHTTPResponse(payload)):
+            out = provider.synthesize(text="speak this", voice_id="alloy")
+        self.assertEqual(out.mime_type, "audio/wav")
+        self.assertEqual(out.audio_bytes, b"FAKE_AUDIO")
+
+    def test_synthesize_surfaces_http_errors(self) -> None:
+        provider = GeminiTTSProvider(api_key="k", model="gemini-2.5-flash-preview-tts")
+
+        def fake_urlopen(req, timeout, context=None):
+            del req, timeout, context
+            raise HTTPError(
+                url="https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent",
+                code=404,
+                msg="not found",
+                hdrs=None,
+                fp=None,
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(RuntimeError) as err:
+                provider.synthesize(text="hello", voice_id="alloy")
+        self.assertIn("gemini_tts_provider_error", str(err.exception))
+
+
+class FallbackTTSProviderTests(unittest.TestCase):
+    def test_fallback_uses_secondary_when_primary_fails(self) -> None:
+        class _FailingTTS:
+            def synthesize(self, *, text: str, voice_id: str):
+                del text, voice_id
+                raise RuntimeError("primary_failed")
+
+        fallback = MockTTSProvider()
+        provider = FallbackTTSProvider(primary=_FailingTTS(), fallback=fallback)
+        out = provider.synthesize(text="hello", voice_id="alloy")
+        self.assertEqual(out.mime_type, "audio/wav")
+        self.assertIn(b"VOICE=alloy", out.audio_bytes)
 
 
 if __name__ == "__main__":

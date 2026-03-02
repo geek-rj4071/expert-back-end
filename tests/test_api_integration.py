@@ -521,6 +521,22 @@ class APIRoutesIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertEqual(turn["assistantMessage"]["role"], "assistant")
 
+        status, deleted = self._request(
+            "DELETE",
+            f"/avatar-service/admin/users/{student['id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(deleted["deleted"])
+
+        status, payload = self._request(
+            "DELETE",
+            f"/avatar-service/admin/users/{login['user']['id']}",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "cannot_delete_admin")
+
 
 if __name__ == "__main__":
     unittest.main()

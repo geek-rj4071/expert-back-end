@@ -267,6 +267,15 @@ class PersistentChatService:
             auth_provider="google",
         )
 
+    def delete_managed_user(self, *, user_id: str) -> bool:
+        target = self.repository.get_user(user_id)
+        if target is None:
+            raise NotFoundError("user_not_found")
+        role = str(target.role or "").strip().lower()
+        if role not in {AccountRole.TEACHER.value, AccountRole.STUDENT.value}:
+            raise ValidationError("cannot_delete_admin")
+        return self.repository.delete_user(user_id=user_id)
+
     def create_conversation(self, *, user_id: str, avatar_id: str) -> Conversation:
         user = self.repository.get_user(user_id)
         if user is None:

@@ -94,6 +94,9 @@ class AvatarAPI:
                 return self._handle_admin_list_users(environ, start_response)
             if method == "POST" and path == f"{API_PREFIX}/admin/users":
                 return self._handle_admin_create_user(environ, start_response)
+            if method == "DELETE" and path.startswith(f"{API_PREFIX}/admin/users/"):
+                user_id = path.split("/")[4] if len(path.split("/")) > 4 else ""
+                return self._handle_admin_delete_user(environ, start_response, user_id)
             if method == "GET" and path == f"{API_PREFIX}/avatars":
                 return self._handle_list_avatars(start_response)
             if method == "POST" and path == f"{API_PREFIX}/conversations":
@@ -216,6 +219,14 @@ class AvatarAPI:
             display_name=str(body.get("name", "")).strip() or None,
         )
         return self._json(start_response, HTTPStatus.CREATED, self._serialize_user(user))
+
+    def _handle_admin_delete_user(self, environ, start_response, user_id: str):
+        self._require_role(environ, AccountRole.ADMIN.value)
+        clean = str(user_id or "").strip()
+        if not clean:
+            raise ValidationError("missing_user_id")
+        deleted = self.service.delete_managed_user(user_id=clean)
+        return self._json(start_response, HTTPStatus.OK, {"deleted": bool(deleted)})
 
     def _handle_list_avatars(self, start_response):
         avatars = self.service.list_avatars()

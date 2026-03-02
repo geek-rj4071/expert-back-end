@@ -155,6 +155,157 @@ class SystemTTSProvider:
         return clean
 
 
+class FallbackTTSProvider:
+    """Try a primary TTS provider, then fallback provider on error."""
+
+    def __init__(self, *, primary: TTSProvider, fallback: TTSProvider) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    def synthesize(self, *, text: str, voice_id: str) -> TTSResult:
+        try:
+            return self.primary.synthesize(text=text, voice_id=voice_id)
+        except Exception as primary_exc:
+            try:
+                return self.fallback.synthesize(text=text, voice_id=voice_id)
+            except Exception as fallback_exc:
+                raise RuntimeError(
+                    f"tts_provider_error: primary={primary_exc}; fallback={fallback_exc}"
+                ) from fallback_exc
+
+
+class GeminiTTSProvider:
+    """Gemini TTS provider with audio response parsing."""
+
+    _DEFAULT_MODEL = "gemini-2.5-flash-preview-tts"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str = "https://generativelanguage.googleapis.com",
+        voice_name: str = "Kore",
+    ) -> None:
+        self.api_key = (api_key or os.getenv("GEMINI_API_KEY", "")).strip()
+        self.model = (model or os.getenv("GEMINI_TTS_MODEL", "")).strip() or self._DEFAULT_MODEL
+        self.base_url = base_url.rstrip("/")
+        self.voice_name = (voice_name or os.getenv("GEMINI_TTS_VOICE", "Kore")).strip() or "Kore"
+        self.ssl_context = self._build_ssl_context()
+
+    def synthesize(self, *, text: str, voice_id: str) -> TTSResult:
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY is required")
+        user_text = str(text or "").strip()
+        if not user_text:
+            raise RuntimeError("gemini_tts_provider_error: empty_text")
+
+        selected_voice = self._resolve_voice_name(voice_id)
+        body = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": user_text},
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+            },
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {
+                        "voiceName": selected_voice,
+                    }
+                }
+            },
+        }
+        model_path = urllib.parse.quote(self.model, safe=":-._")
+        req = urllib.request.Request(
+            f"{self.base_url}/v1beta/models/{model_path}:generateContent",
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "X-goog-api-key": self.api_key,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45, context=self.ssl_context) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body_text = ""
+            fp = exc.fp
+            try:
+                if fp is not None:
+                    body_text = fp.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                body_text = ""
+            finally:
+                try:
+                    if fp is not None:
+                        fp.close()
+                except Exception:
+                    pass
+                try:
+                    exc.close()
+                except Exception:
+                    pass
+            detail = body_text or str(exc)
+            raise RuntimeError(f"gemini_tts_provider_error: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"gemini_tts_provider_error: {exc}") from exc
+
+        audio_bytes, mime_type = self._extract_audio_payload(payload)
+        if not audio_bytes:
+            raise RuntimeError("gemini_tts_provider_error: empty_audio")
+        return TTSResult(audio_bytes=audio_bytes, mime_type=mime_type or "audio/wav")
+
+    def _resolve_voice_name(self, voice_id: str) -> str:
+        clean = str(voice_id or "").strip()
+        if not clean:
+            return self.voice_name
+        mapped = {
+            "alloy": self.voice_name,
+            "sage": self.voice_name,
+            "verse": self.voice_name,
+        }
+        return mapped.get(clean.lower(), clean)
+
+    def _extract_audio_payload(self, payload: dict) -> tuple[bytes, str]:
+        candidates = payload.get("candidates") or []
+        for candidate in candidates:
+            content = (candidate or {}).get("content") or {}
+            parts = content.get("parts") or []
+            for part in parts:
+                inline = (part or {}).get("inlineData") or (part or {}).get("inline_data") or {}
+                data_b64 = str(inline.get("data", "")).strip()
+                if not data_b64:
+                    continue
+                try:
+                    audio = base64.b64decode(data_b64)
+                except Exception:
+                    continue
+                mime_type = str(inline.get("mimeType") or inline.get("mime_type") or "audio/wav").strip()
+                return audio, mime_type
+        return b"", ""
+
+    def _build_ssl_context(self) -> ssl.SSLContext:
+        ca_bundle = os.getenv("GEMINI_CA_BUNDLE", "").strip() or os.getenv("SSL_CERT_FILE", "").strip()
+        if ca_bundle:
+            try:
+                return ssl.create_default_context(cafile=ca_bundle)
+            except Exception as exc:
+                raise RuntimeError(f"gemini_tts_provider_error: invalid_ca_bundle: {ca_bundle}: {exc}") from exc
+
+        try:
+            import certifi  # type: ignore
+
+            return ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            return ssl.create_default_context()
+
+
 class OpenAIChatProvider:
     """Basic OpenAI-compatible chat provider over HTTP."""
 

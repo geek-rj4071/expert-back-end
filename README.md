@@ -74,6 +74,29 @@ docker run --rm -p 8000:8000 \
   expert-back-end:latest
 ```
 
+## Auto Deploy On Every Push
+
+This repo includes GitHub Actions workflow:
+
+- `.github/workflows/docker-cicd.yml`
+
+On each push to `main`:
+
+1. Build Docker image
+2. Push image to GHCR:
+   - `ghcr.io/<github-user-or-org>/expert-back-end:latest`
+   - `ghcr.io/<github-user-or-org>/expert-back-end:sha-<commit>`
+3. Optional server deploy over SSH (if secrets are configured)
+
+### Required GitHub Secrets (for auto-deploy job)
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PATH` (directory on server containing your `docker-compose.yml`)
+
+If these are not set, image build/push still runs, deploy job is skipped.
+
 ## Key Environment Variables
 
 - `AI_PROVIDER`: `deterministic` | `openai` | `gemini` | `ollama`
@@ -106,4 +129,3 @@ Examples:
 - `insufficient_readable_text`: OCR could not extract text; verify file quality and OCR tools.
 - `image_ocr_unavailable`: install OCR tools or configure Gemini API key for vision fallback.
 - `OPENAI_API_KEY is required`: set `AI_PROVIDER` and matching API key correctly.
-

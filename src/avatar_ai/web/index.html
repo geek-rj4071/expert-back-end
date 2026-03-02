@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AvatarTalk Call</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <main class="call-layout">
+      <section class="remote-stage reveal">
+        <div class="stage-top">
+          <div class="teacher-brand">
+            <div class="logo-badge" aria-label="Teach alphabet to a kid logo">
+              <svg viewBox="0 0 128 128" role="img" aria-hidden="true">
+                <defs>
+                  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#0f9f92" />
+                    <stop offset="100%" stop-color="#f05d3f" />
+                  </linearGradient>
+                </defs>
+                <rect x="6" y="6" width="116" height="116" rx="22" fill="url(#bg)" />
+                <rect x="22" y="20" width="84" height="40" rx="8" fill="#10233f" />
+                <text x="29" y="47" font-size="24" font-weight="700" fill="#ffffff">ABC</text>
+                <circle cx="38" cy="88" r="12" fill="#ffd6ae" />
+                <rect x="28" y="99" width="20" height="14" rx="6" fill="#1f2f5d" />
+                <circle cx="82" cy="84" r="14" fill="#ffe5bf" />
+                <path d="M68 102c3-11 12-18 25-18s22 7 25 18" fill="#223b70" />
+              </svg>
+            </div>
+            <div>
+              <h1 id="avatar-title">SP Sir</h1>
+            </div>
+          </div>
+          <code id="call-status">idle</code>
+        </div>
+
+        <div class="avatar-video" id="avatar-video">
+          <div class="avatar-3d" id="avatar-3d">
+            <div class="scene-light light-a"></div>
+            <div class="scene-light light-b"></div>
+            <div class="avatar-rig mood-neutral" id="avatar-rig">
+              <div class="torso"></div>
+              <div class="neck"></div>
+              <div class="head" id="avatar-head">
+                <div class="hair"></div>
+                <div class="ear ear-left"></div>
+                <div class="ear ear-right"></div>
+                <div class="brow brow-left"></div>
+                <div class="brow brow-right"></div>
+                <div class="eye eye-left"><span class="pupil"></span></div>
+                <div class="eye eye-right"><span class="pupil"></span></div>
+                <div class="nose"></div>
+                <div class="cheek cheek-left"></div>
+                <div class="cheek cheek-right"></div>
+                <div class="mouth" id="avatar-mouth"></div>
+                <div class="chin-shadow"></div>
+              </div>
+            </div>
+            <div class="expression-chip" id="expression-chip">neutral</div>
+          </div>
+          <div class="caption-box" id="live-caption">Voice-only mode: avatar responses are spoken.</div>
+        </div>
+
+        <div class="controls">
+          <button id="start-call">Start Call</button>
+          <button id="end-call" class="ghost">End Call</button>
+          <button id="mute-mic" class="ghost">Mute Mic</button>
+          <button id="test-voice" class="ghost">Test Voice</button>
+        </div>
+
+        <div class="push-row">
+          <span id="talk-hint">Continuous listening is off</span>
+        </div>
+        <div class="student-transcript-box">
+          <div class="student-transcript-label">Student (Live)</div>
+          <div id="student-transcript" class="student-transcript-value">Listening transcript will appear here...</div>
+        </div>
+        <div class="conversation-box">
+          <div class="student-transcript-label">Conversation Transcript</div>
+          <div id="conversation-transcript" class="conversation-list">
+            <div class="conversation-line muted">No conversation yet.</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side-panel reveal" style="--delay: 90ms">
+        <section class="card session-card-panel">
+          <h2>Session</h2>
+          <form id="signup-form" class="stack">
+            <input id="email-input" type="email" placeholder="you@example.com" required />
+            <button type="submit">Create User Session</button>
+          </form>
+          <div class="line"><span>User</span><code id="user-id">not set</code></div>
+          <div class="line"><span>Conversation</span><code id="conversation-id">not set</code></div>
+        </section>
+
+        <section class="card avatar-card-panel">
+          <div class="row-head">
+            <h2>Avatar</h2>
+            <button id="refresh-avatars" class="ghost">Refresh</button>
+          </div>
+          <div id="avatar-grid" class="avatar-grid"></div>
+        </section>
+
+        <section class="card">
+          <div class="row-head">
+            <h2>Teacher Training</h2>
+            <button id="refresh-training" class="ghost">Refresh</button>
+          </div>
+          <form id="training-form" class="stack">
+            <input id="training-file" type="file" accept=".pdf,.txt,.md,.rtf,.doc,.docx" required />
+            <button id="upload-training" type="submit">Upload Book</button>
+          </form>
+          <p class="note">Upload matric-level PDFs/books. Avatar will answer from uploaded material only.</p>
+          <div class="line"><span>Documents</span><code id="training-doc-count">0</code></div>
+          <div class="line"><span>Chunks</span><code id="training-chunk-count">0</code></div>
+          <div class="line"><span>Characters</span><code id="training-char-count">0</code></div>
+          <div class="row-head">
+            <h3>Uploaded</h3>
+            <button id="clear-training" type="button" class="ghost">Clear</button>
+          </div>
+          <div id="training-doc-list" class="training-doc-list">No books uploaded yet.</div>
+        </section>
+
+        <section class="card">
+          <h2>Voice Output</h2>
+          <audio id="audio-player" controls></audio>
+        </section>
+      </aside>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

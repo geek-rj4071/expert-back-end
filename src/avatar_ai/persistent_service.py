@@ -64,6 +64,7 @@ class PersistentServiceConfig:
     ocr_max_pages: int = 15
     ocr_language: str = "eng"
     max_student_image_file_bytes: int = 6_000_000
+    hinglish_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -553,7 +554,7 @@ class PersistentChatService:
         docs = self.repository.list_training_documents(avatar_id=avatar_id)
         if not docs:
             return LLMResult(
-                text=(
+                text=self._finalize_teacher_text(
                     "I am your matric teacher. No training books are uploaded yet. "
                     "Please upload matric-level PDF/books first, then ask your question."
                 ),
@@ -561,10 +562,11 @@ class PersistentChatService:
             )
 
         effective_question = self._effective_question(user_text=user_text, conversation=conversation)
-        is_math_question = self._is_math_question(effective_question)
-        if self._is_casual_non_academic_question(effective_question):
+        retrieval_question = self._question_for_retrieval(effective_question)
+        is_math_question = self._is_math_question(retrieval_question)
+        if self._is_casual_non_academic_question(retrieval_question):
             return LLMResult(
-                text=(
+                text=self._finalize_teacher_text(
                     "I am your matric-level teacher only. I can answer school syllabus questions "
                     "from your uploaded books. Please ask a matric subject question."
                 ),
@@ -572,13 +574,13 @@ class PersistentChatService:
             )
         retrieved_chunks = self._retrieve_relevant_chunks_scored(
             avatar_id=avatar_id,
-            question=effective_question,
+            question=retrieval_question,
             top_k=7 if is_math_question else 5,
             prefer_math=is_math_question,
         )
-        if not retrieved_chunks or not self._retrieval_is_confident(effective_question, retrieved_chunks):
+        if not retrieved_chunks or not self._retrieval_is_confident(retrieval_question, retrieved_chunks):
             return LLMResult(
-                text=(
+                text=self._finalize_teacher_text(
                     "I can answer only from uploaded books. I could not find this question clearly in the uploaded "
                     "material. Please ask from uploaded chapters or upload the relevant chapter/book."
                 ),
@@ -588,9 +590,9 @@ class PersistentChatService:
         top_chunks = [item.text for item in retrieved_chunks]
         context = " ".join(top_chunks)
         local_answer = (
-            self._build_math_structured_answer(question=effective_question, context=context)
+            self._build_math_structured_answer(question=retrieval_question, context=context)
             if is_math_question
-            else self._summarize_from_context(question=effective_question, context=context)
+            else self._summarize_from_context(question=retrieval_question, context=context)
         )
 
         lines = [
@@ -604,10 +606,11 @@ class PersistentChatService:
         # Use external providers for natural language while preserving local fallback.
         if not isinstance(self.llm_provider, DeterministicLLMProvider):
             prompt = self._build_rag_user_prompt(
-                question=effective_question,
+                question=retrieval_question,
                 context=context,
                 is_math_question=is_math_question,
                 internet_context="",
+                original_question=effective_question,
             )
             try:
                 llm_result = self.llm_provider.complete(
@@ -617,14 +620,14 @@ class PersistentChatService:
                 text = self._normalize_whitespace(llm_result.text)
                 if text:
                     return LLMResult(
-                        text=text,
+                        text=self._finalize_teacher_text(text, can_use_llm_rewriter=True),
                         emotion=(llm_result.emotion or "confident"),
                     )
             except Exception:
                 if not self.llm_fallback_enabled:
                     raise
 
-        return LLMResult(text=local_text, emotion="confident")
+        return LLMResult(text=self._finalize_teacher_text(local_text), emotion="confident")
 
     def _should_use_internet_fallback(self, *, user_text: str, conversation: Conversation | None) -> bool:
         if self.config.strict_book_only_mode:
@@ -743,6 +746,126 @@ class PersistentChatService:
             f"{current}\n\n"
             f"Student image context ({image_context.filename}): {excerpt}"
         )
+
+    def _question_for_retrieval(self, question: str) -> str:
+        clean = self._normalize_whitespace(question)
+        if not clean:
+            return clean
+        if not self.config.hinglish_enabled:
+            return clean
+        if not self._looks_hinglish_or_hindi(clean):
+            return clean
+
+        translated = self._translate_hinglish_to_english(clean)
+        if translated:
+            return translated
+        return self._heuristic_hinglish_to_english(clean)
+
+    def _looks_hinglish_or_hindi(self, text: str) -> bool:
+        lowered = text.lower()
+        if re.search(r"[\u0900-\u097F]", text):
+            return True
+        markers = (
+            "kya",
+            "kaise",
+            "kyun",
+            "kyu",
+            "samjhao",
+            "samjha",
+            "batao",
+            "matlab",
+            "ka ",
+            "ke ",
+            "ki ",
+            "nahi",
+            "hain",
+            "hai",
+            "karna",
+            "karo",
+            "question ka",
+            "chapter ka",
+            "iske bare",
+            "iska",
+        )
+        return any(token in lowered for token in markers)
+
+    def _translate_hinglish_to_english(self, text: str) -> str:
+        if isinstance(self.llm_provider, DeterministicLLMProvider):
+            return ""
+        try:
+            result = self.llm_provider.complete(
+                persona=(
+                    "You are a translation engine. Convert Hinglish/Hindi student questions into concise English "
+                    "questions for retrieval. Return only English text."
+                ),
+                user_text=f"Translate to English only: {text}",
+            )
+        except Exception:
+            return ""
+        translated = self._normalize_whitespace(result.text)
+        translated = re.sub(r"^(english|translation)\s*:\s*", "", translated, flags=re.I)
+        return translated
+
+    def _heuristic_hinglish_to_english(self, text: str) -> str:
+        lowered = text.lower()
+        replacements = [
+            (r"\bkya\b", "what"),
+            (r"\bkaise\b", "how"),
+            (r"\bkyu?n\b", "why"),
+            (r"\bkab\b", "when"),
+            (r"\bkahan\b", "where"),
+            (r"\bka\b", "of"),
+            (r"\bke\b", "of"),
+            (r"\bki\b", "of"),
+            (r"\bka matlab\b", "meaning"),
+            (r"\bsamjhao\b", "explain"),
+            (r"\bsamjha[o]?\b", "explain"),
+            (r"\bbatao\b", "tell"),
+            (r"\bkaro\b", "do"),
+            (r"\bsolve karo\b", "solve"),
+            (r"\bnahi\b", "not"),
+            (r"\biske bare mein\b", "about this"),
+            (r"\biske bare\b", "about this"),
+            (r"\biska\b", "its"),
+            (r"\baur\b", "and"),
+        ]
+        out = lowered
+        for pattern, replacement in replacements:
+            out = re.sub(pattern, replacement, out)
+        out = re.sub(r"[\u0900-\u097F]+", " ", out)
+        out = self._normalize_whitespace(out)
+        return out or text
+
+    def _finalize_teacher_text(self, text: str, *, can_use_llm_rewriter: bool = False) -> str:
+        clean = self._normalize_whitespace(text)
+        if not clean or not self.config.hinglish_enabled:
+            return clean
+        if self._looks_hinglish_or_hindi(clean):
+            return clean
+        llm_rewriter_allowed = type(self.llm_provider).__name__ in {
+            "OpenAIChatProvider",
+            "GeminiChatProvider",
+            "OllamaChatProvider",
+        }
+        if can_use_llm_rewriter and llm_rewriter_allowed:
+            rewritten = self._rewrite_answer_to_hinglish(clean)
+            if rewritten:
+                return rewritten
+        return f"{clean} Hinglish mein: Main is topic ko simple Hindi + English mix mein samjha raha hoon."
+
+    def _rewrite_answer_to_hinglish(self, text: str) -> str:
+        try:
+            result = self.llm_provider.complete(
+                persona=(
+                    "You are SP Sir language rewriter. Rewrite the text in natural Hinglish (Hindi + English mix) "
+                    "using Roman script, preserving facts exactly."
+                ),
+                user_text=f"Rewrite in Hinglish (Roman script), keep meaning exactly:\n{text}",
+            )
+        except Exception:
+            return ""
+        rewritten = self._normalize_whitespace(result.text)
+        return rewritten
 
     def _build_math_structured_answer(self, *, question: str, context: str) -> str:
         concept = self._summarize_from_context(question=question, context=context)
@@ -864,6 +987,7 @@ class PersistentChatService:
             "llmFallbackEnabled": self.llm_fallback_enabled,
             "internetLookupEnabled": self.config.internet_lookup_enabled,
             "strictBookOnlyMode": self.config.strict_book_only_mode,
+            "hinglishEnabled": self.config.hinglish_enabled,
         }
 
     def _ensure_user(self, user_id: str) -> None:
@@ -1757,6 +1881,11 @@ class PersistentChatService:
             if allow_internet_notes and not self.config.strict_book_only_mode
             else "Never use external knowledge. If context is missing, refuse and ask for relevant uploaded chapter."
         )
+        language_instruction = (
+            "Respond in natural Hinglish (Hindi + English mix) using Roman script."
+            if self.config.hinglish_enabled
+            else "Respond in clear English."
+        )
         return (
             "You are SP Sir, a matric-level teacher using strict retrieval-augmented generation (RAG). "
             "Hard rules: "
@@ -1764,6 +1893,7 @@ class PersistentChatService:
             "2) If context is insufficient, clearly state which chapter/topic from uploaded books is missing. "
             "3) Do not invent facts, formulas, chapters, or references. "
             "4) Keep wording clear for school students. "
+            f"5) {language_instruction} "
             f"{extra}"
         )
 
@@ -1800,13 +1930,22 @@ class PersistentChatService:
         context: str,
         is_math_question: bool,
         internet_context: str,
+        original_question: str = "",
     ) -> str:
         lines = [
-            f"Student question: {question}",
+            f"Student question (normalized English for retrieval): {question}",
+        ]
+        if original_question and self._normalize_whitespace(original_question.lower()) != self._normalize_whitespace(question.lower()):
+            lines.append(f"Original student question: {original_question}")
+        lines.extend(
+            [
+                "",
+                "Answer style: Hinglish (Hindi + English mix in Roman script).",
             "",
             "Retrieved syllabus context:",
             context,
-        ]
+            ]
+        )
         if internet_context:
             lines.extend(["", "Supplemental internet notes:", internet_context])
         lines.extend(

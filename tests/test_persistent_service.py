@@ -31,6 +31,21 @@ class _CapturingLLMProvider:
         )
 
 
+class _HinglishTranslationProvider:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def complete(self, *, persona: str, user_text: str):
+        self.calls.append({"persona": persona, "user_text": user_text})
+        lower_persona = persona.lower()
+        if "translation engine" in lower_persona:
+            return LLMResult(text="Explain human brain functions", emotion="neutral")
+        return LLMResult(
+            text="Yeh answer uploaded books ke context se hai. Brain body ko control karta hai.",
+            emotion="confident",
+        )
+
+
 class PersistentChatServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -655,6 +670,66 @@ class PersistentChatServiceTests(unittest.TestCase):
         text = turn.assistant_message.text.lower()
         self.assertNotIn("outside your uploaded syllabus context", text)
         self.assertIn("uploaded material", text)
+
+    def test_hinglish_question_is_normalized_to_english_for_retrieval(self) -> None:
+        provider = _HinglishTranslationProvider()
+        service = PersistentChatService(
+            repository=self.repo,
+            llm_provider=provider,
+            config=PersistentServiceConfig(
+                max_message_chars=200,
+                memory_messages_limit=4,
+                rate_limit_max_requests=10,
+                rate_limit_window_seconds=60,
+                hinglish_enabled=True,
+            ),
+        )
+        service.seed_avatars([self.avatar])
+        user = service.register_user("hinglish-query@example.com")
+        convo = service.create_conversation(user_id=user.id, avatar_id=self.avatar.id)
+        service.upload_training_material(
+            user_id=user.id,
+            avatar_id=self.avatar.id,
+            filename="biology-hinglish.txt",
+            file_bytes=(
+                b"Human brain controls memory, thinking, and movement. "
+                b"Cerebrum and cerebellum are important parts in matric science chapter."
+            ),
+        )
+
+        turn = service.send_message(
+            user_id=user.id,
+            conversation_id=convo.id,
+            text="human brain ke bare mein samjhao",
+        )
+        self.assertIn("answer uploaded books", turn.assistant_message.text.lower())
+        self.assertGreaterEqual(len(provider.calls), 2)
+        self.assertTrue(any("translation engine" in c["persona"].lower() for c in provider.calls))
+        rag_call = next(
+            c for c in provider.calls
+            if "strict retrieval-augmented generation" in c["persona"].lower()
+        )
+        self.assertIn("normalized english for retrieval", rag_call["user_text"].lower())
+        self.assertIn("explain human brain functions", rag_call["user_text"].lower())
+
+    def test_local_teacher_reply_adds_hinglish_suffix(self) -> None:
+        user = self.service.register_user("hinglish-local@example.com")
+        convo = self.service.create_conversation(user_id=user.id, avatar_id=self.avatar.id)
+        self.service.upload_training_material(
+            user_id=user.id,
+            avatar_id=self.avatar.id,
+            filename="chemistry-local.txt",
+            file_bytes=(
+                b"Acids turn blue litmus red and bases turn red litmus blue in school chemistry chapter. "
+                b"This matric lesson explains indicators and neutralization with practical examples."
+            ),
+        )
+        turn = self.service.send_message(
+            user_id=user.id,
+            conversation_id=convo.id,
+            text="What happens to litmus in acid?",
+        )
+        self.assertIn("Hinglish mein:", turn.assistant_message.text)
 
     def test_student_image_context_is_appended_once(self) -> None:
         user = self.service.register_user("image-once@example.com")

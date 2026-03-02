@@ -106,6 +106,7 @@ def create_app(db_path: str | None = None):
     internet_lookup_enabled = os.getenv("INTERNET_LOOKUP_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
     strict_book_only_mode = os.getenv("STRICT_BOOK_ONLY_MODE", "true").strip().lower() in {"1", "true", "yes"}
     ocr_enabled = os.getenv("OCR_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+    hinglish_enabled = os.getenv("HINGLISH_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
     ocr_language = os.getenv("OCR_LANGUAGE", "eng")
 
     service_config = PersistentServiceConfig(
@@ -116,6 +117,7 @@ def create_app(db_path: str | None = None):
         max_student_image_file_bytes=max(300_000, max_student_image_file_bytes),
         internet_lookup_enabled=internet_lookup_enabled,
         strict_book_only_mode=strict_book_only_mode,
+        hinglish_enabled=hinglish_enabled,
         chunk_chars=max(300, chunk_chars),
         chunk_overlap_chars=max(40, chunk_overlap_chars),
         embedding_dimension=max(64, embedding_dimension),
@@ -195,6 +197,7 @@ def main() -> None:
             f"CORS_ALLOW_ORIGIN={os.getenv('CORS_ALLOW_ORIGIN', '*')}, "
             f"INTERNET_LOOKUP_ENABLED={os.getenv('INTERNET_LOOKUP_ENABLED', 'false')}, "
             f"STRICT_BOOK_ONLY_MODE={os.getenv('STRICT_BOOK_ONLY_MODE', 'true')}, "
+            f"HINGLISH_ENABLED={os.getenv('HINGLISH_ENABLED', 'true')}, "
             f"LLM_FALLBACK_ENABLED={llm_fallback_enabled})"
         )
         server.serve_forever()

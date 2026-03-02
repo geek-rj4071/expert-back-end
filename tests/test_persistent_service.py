@@ -712,6 +712,25 @@ class PersistentChatServiceTests(unittest.TestCase):
         self.assertIn("normalized english for retrieval", rag_call["user_text"].lower())
         self.assertIn("explain human brain functions", rag_call["user_text"].lower())
 
+    def test_hinglish_retrieval_query_keeps_original_and_english_context(self) -> None:
+        provider = _HinglishTranslationProvider()
+        service = PersistentChatService(
+            repository=self.repo,
+            llm_provider=provider,
+            config=PersistentServiceConfig(
+                max_message_chars=200,
+                memory_messages_limit=4,
+                rate_limit_max_requests=10,
+                rate_limit_window_seconds=60,
+                hinglish_enabled=True,
+            ),
+        )
+        question = "human brain ke bare mein samjhao"
+        retrieval_query = service._question_for_retrieval(question)
+        lower = retrieval_query.lower()
+        self.assertIn("human brain ke bare", lower)
+        self.assertIn("explain human brain functions", lower)
+
     def test_local_teacher_reply_adds_hinglish_suffix(self) -> None:
         user = self.service.register_user("hinglish-local@example.com")
         convo = self.service.create_conversation(user_id=user.id, avatar_id=self.avatar.id)

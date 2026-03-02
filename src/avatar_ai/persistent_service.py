@@ -762,13 +762,19 @@ class PersistentChatService:
             return clean
         if not self.config.hinglish_enabled:
             return clean
-        if not self._looks_hinglish_or_hindi(clean):
-            return clean
+        normalized_english = ""
+        if self._looks_hinglish_or_hindi(clean):
+            normalized_english = self._translate_hinglish_to_english(clean)
+            if not normalized_english:
+                normalized_english = self._heuristic_hinglish_to_english(clean)
 
-        translated = self._translate_hinglish_to_english(clean)
-        if translated:
-            return translated
-        return self._heuristic_hinglish_to_english(clean)
+        normalized_english = self._normalize_whitespace(normalized_english)
+        if not normalized_english:
+            return clean
+        if self._normalize_whitespace(clean.lower()) == self._normalize_whitespace(normalized_english.lower()):
+            return clean
+        # Always keep both contexts for retrieval: original student text + normalized English.
+        return self._normalize_whitespace(f"{clean} {normalized_english}")
 
     def _looks_hinglish_or_hindi(self, text: str) -> bool:
         lowered = text.lower()
